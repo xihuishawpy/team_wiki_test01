@@ -1,0 +1,13 @@
+{
+  "name": "@team-wiki/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@team-wiki/platform": "workspace:*"
+  }
+}

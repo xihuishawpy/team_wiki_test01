@@ -1,0 +1,109 @@
+name: team-wiki-local
+
+x-app-environment: &app-environment
+  NODE_ENV: development
+  LOG_LEVEL: info
+  DATABASE_URL: postgres://team_wiki:local_only_change_me@postgres:5432/team_wiki
+  GITHUB_PUBLISH_ENABLED: 'false'
+  GITHUB_READ_ENABLED: 'false'
+  MODEL_ENABLED: 'false'
+
+x-app-runtime: &app-runtime
+  build:
+    context: .
+    target: runtime
+  environment: *app-environment
+  init: true
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+
+services:
+  postgres:
+    image: postgres:18.4-alpine3.23
+    environment:
+      POSTGRES_DB: team_wiki
+      POSTGRES_USER: team_wiki
+      POSTGRES_PASSWORD: local_only_change_me
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U team_wiki -d team_wiki']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+  migrate:
+    <<: *app-runtime
+    command: ['node', 'packages/platform/dist/migrations/cli.js', 'up']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  fake-external:
+    <<: *app-runtime
+    command: ['node', 'apps/fake-external/dist/main.js']
+    environment:
+      NODE_ENV: development
+      ALLOW_FAKE_EXTERNAL: 'true'
+      FAKE_EXTERNAL_PORT: '4010'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4010/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    <<: *app-runtime
+    command: ['node', 'apps/api/dist/main.js']
+    ports:
+      - '${PORT:-3000}:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      fake-external:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  publish-worker:
+    <<: *app-runtime
+    command: ['node', 'apps/worker/dist/main.js', 'publish']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  classify-worker:
+    <<: *app-runtime
+    command: ['node', 'apps/worker/dist/main.js', 'classify']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  reconcile-worker:
+    <<: *app-runtime
+    command: ['node', 'apps/worker/dist/main.js', 'reconcile']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:

@@ -1,0 +1,1448 @@
+openapi: 3.1.0
+info:
+  title: AI Team Content Platform API
+  version: 0.1.0
+  description: |
+    OWN-71 contract-first draft based on PRD v0.4.
+    Published content is addressed by immutable GitHub commit SHA.
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+tags:
+  - name: Health
+    description: Process and dependency health probes.
+  - name: Auth
+    description: Local username/password authentication and sessions.
+  - name: Users
+    description: Administrator-managed user lifecycle.
+  - name: Drafts
+    description: Database-backed drafts and idempotent publication.
+  - name: Articles
+    description: Permission-filtered immutable published content.
+  - name: Taxonomy
+    description: Controlled content types, topics, and projects.
+  - name: Classifications
+    description: Automated classification and human review.
+  - name: Search
+    description: Permission-safe full-text search and filtering.
+  - name: Integrations
+    description: Authenticated inbound external events.
+  - name: Admin
+    description: Model configuration, audit, and system operations.
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      operationId: getLiveness
+      summary: Check process liveness
+      security: []
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Liveness'
+  /health/ready:
+    get:
+      tags: [Health]
+      operationId: getReadiness
+      summary: Check application readiness
+      security: []
+      responses:
+        '200':
+          description: Required dependencies are ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Log in with username and password
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Session cookie and CSRF token issued.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthContext'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/auth/csrf:
+    get:
+      tags: [Auth]
+      operationId: issuePreAuthCsrfToken
+      summary: Issue a pre-authentication CSRF token
+      security: []
+      responses:
+        '200':
+          description: Token tied to a short-lived same-site pre-authentication cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsrfTokenResponse'
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Revoke the current session
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Current session revoked.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Get the current authentication context
+      responses:
+        '200':
+          description: Current authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthContext'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/auth/change-password:
+    post:
+      tags: [Auth]
+      operationId: changePassword
+      summary: Change the current user's password
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204':
+          description: Password changed and other sessions revoked.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/admin/users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List platform users
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: User page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Users]
+      operationId: createUser
+      summary: Create a managed user account
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User and one-time initial credential created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/users/{userId}/reset-password:
+    post:
+      tags: [Users]
+      operationId: resetUserPassword
+      summary: Reset a user's password
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: One-time credential returned once; all sessions revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneTimeCredential'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/admin/users/{userId}/disable:
+    post:
+      tags: [Users]
+      operationId: disableUser
+      summary: Disable a user account
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Account disabled and sessions revoked.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/drafts:
+    get:
+      tags: [Drafts]
+      operationId: listMyDrafts
+      summary: List drafts owned by the current user
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Draft page owned by current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftPage'
+    post:
+      tags: [Drafts]
+      operationId: createDraft
+      summary: Create a database-backed draft
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDraftRequest'
+      responses:
+        '201':
+          description: Draft created without contacting GitHub.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Draft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/drafts/{draftId}:
+    get:
+      tags: [Drafts]
+      operationId: getDraft
+      summary: Get a draft revision
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      responses:
+        '200':
+          description: Current draft revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Draft'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Drafts]
+      operationId: updateDraft
+      summary: Update a draft with optimistic locking
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/UpdateDraftRequest'
+      responses:
+        '200':
+          description: Draft revision updated without Git commit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Draft'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/drafts/{draftId}/publish:
+    post:
+      tags: [Drafts]
+      operationId: publishDraft
+      summary: Start an idempotent GitHub publication
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishDraftRequest'
+      responses:
+        '202':
+          description: Durable publish request accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/publish-requests/{publishRequestId}:
+    get:
+      tags: [Drafts]
+      operationId: getPublishRequest
+      summary: Get durable publication state
+      parameters:
+        - $ref: '#/components/parameters/PublishRequestId'
+      responses:
+        '200':
+          description: Current durable publish state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/articles:
+    get:
+      tags: [Articles]
+      operationId: listArticles
+      summary: List visible published articles
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: content_type_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: topic_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: project_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: Permission-filtered article page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticlePage'
+  /api/articles/{articleId}:
+    get:
+      tags: [Articles]
+      operationId: getArticle
+      summary: Read an article at its recorded commit
+      parameters:
+        - $ref: '#/components/parameters/ArticleId'
+      responses:
+        '200':
+          description: Published content from the recorded immutable commit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/articles/{articleId}/versions:
+    get:
+      tags: [Articles]
+      operationId: listArticleVersions
+      summary: List immutable article versions
+      parameters:
+        - $ref: '#/components/parameters/ArticleId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Permission-filtered immutable version summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ArticleVersion'
+                  next_cursor:
+                    type: [string, 'null']
+  /api/articles/{articleId}/unpublish:
+    post:
+      tags: [Articles]
+      operationId: unpublishArticle
+      summary: Hide an article without deleting Git history
+      parameters:
+        - $ref: '#/components/parameters/ArticleId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Article hidden from platform; Git history retained.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/taxonomy:
+    get:
+      tags: [Taxonomy]
+      operationId: getTaxonomy
+      summary: Get the current enabled taxonomy
+      responses:
+        '200':
+          description: Current enabled taxonomy and stable version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Taxonomy'
+  /api/admin/taxonomy:
+    get:
+      tags: [Taxonomy]
+      operationId: listAllTaxonomyNodes
+      summary: List all taxonomy nodes
+      responses:
+        '200':
+          description: Enabled and disabled taxonomy nodes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Taxonomy'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Taxonomy]
+      operationId: createTaxonomyNode
+      summary: Create a controlled taxonomy node
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaxonomyNodeWrite'
+      responses:
+        '201':
+          description: Stable taxonomy node created and version incremented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaxonomyNode'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/taxonomy/{nodeId}:
+    patch:
+      tags: [Taxonomy]
+      operationId: updateTaxonomyNode
+      summary: Update or disable a taxonomy node
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/TaxonomyNodeWrite'
+      responses:
+        '200':
+          description: Node updated without reusing its stable ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaxonomyNode'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/classifications/review-queue:
+    get:
+      tags: [Classifications]
+      operationId: listClassificationReviewQueue
+      summary: List classifications needing review
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [needs_review, failed]
+      responses:
+        '200':
+          description: Classification review queue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClassificationPage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/classifications/{classificationId}/confirm:
+    post:
+      tags: [Classifications]
+      operationId: confirmClassification
+      summary: Confirm a classification result
+      parameters:
+        - $ref: '#/components/parameters/ClassificationId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClassificationFeedbackRequest'
+      responses:
+        '200':
+          description: Result confirmed; published content remains unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Classification'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/classifications/{classificationId}:
+    patch:
+      tags: [Classifications]
+      operationId: correctClassification
+      summary: Correct classification metadata
+      parameters:
+        - $ref: '#/components/parameters/ClassificationId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClassificationCorrectionRequest'
+      responses:
+        '200':
+          description: Classification metadata corrected and audited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Classification'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/classifications/{classificationId}/retry:
+    post:
+      tags: [Classifications]
+      operationId: retryClassification
+      summary: Retry a failed classification
+      parameters:
+        - $ref: '#/components/parameters/ClassificationId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '202':
+          description: Idempotent retry queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Classification'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/search:
+    get:
+      tags: [Search]
+      operationId: searchArticles
+      summary: Search visible articles
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: content_type_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: topic_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: project_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: tag
+          in: query
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Permission-filtered search page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticlePage'
+  /api/admin/model-config:
+    put:
+      tags: [Admin]
+      operationId: updateModelConfig
+      summary: Update the model adapter configuration
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelConfigWrite'
+      responses:
+        '200':
+          description: Masked model configuration; secret value never returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelConfig'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/model-config/test:
+    post:
+      tags: [Admin]
+      operationId: testModelConfig
+      summary: Test the model adapter with synthetic content
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Minimal synthetic structured-output test result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependencyStatus'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/webhooks/github:
+    post:
+      tags: [Integrations]
+      operationId: acceptGitHubWebhook
+      summary: Accept a signed GitHub webhook delivery
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/GitHubEvent'
+        - $ref: '#/components/parameters/GitHubDelivery'
+        - $ref: '#/components/parameters/GitHubSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '202':
+          description: Signature verified and delivery durably accepted or deduplicated.
+        '401':
+          description: Signature missing or invalid.
+  /api/admin/audit-logs:
+    get:
+      tags: [Admin]
+      operationId: listAuditLogs
+      summary: List append-only audit records
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: actor_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: object_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: action
+          in: query
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        '200':
+          description: Append-only audit page without content or secrets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditPage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/admin/system-health:
+    get:
+      tags: [Admin]
+      operationId: getSystemHealth
+      summary: Get sanitized dependency and queue health
+      responses:
+        '200':
+          description: Sanitized dependency and queue status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealth'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-team_content_session
+  parameters:
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 32
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Quoted current draft revision, for example "7".
+      schema:
+        type: string
+        pattern: '^"[0-9]+"$'
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+        maxLength: 512
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    DraftId:
+      name: draftId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    PublishRequestId:
+      name: publishRequestId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    ArticleId:
+      name: articleId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    ClassificationId:
+      name: classificationId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    GitHubEvent:
+      name: X-GitHub-Event
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [ping, push]
+    GitHubDelivery:
+      name: X-GitHub-Delivery
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    GitHubSignature:
+      name: X-Hub-Signature-256
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: '^sha256=[a-f0-9]{64}$'
+  responses:
+    BadRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required or credentials invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated but not authorized.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource absent or not visible to the caller.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Version, state, or idempotency conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit or temporary login lock reached.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: Required dependency unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    Timestamp:
+      type: string
+      format: date-time
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+        details:
+          type: [object, 'null']
+          additionalProperties: true
+    Liveness:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          const: ok
+    Readiness:
+      type: object
+      additionalProperties: false
+      required: [status, database]
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded, unavailable]
+        database:
+          $ref: '#/components/schemas/DependencyStatus'
+        github:
+          $ref: '#/components/schemas/DependencyStatus'
+        model:
+          $ref: '#/components/schemas/DependencyStatus'
+    DependencyStatus:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unavailable, disabled, unconfigured]
+        error_code:
+          type: [string, 'null']
+        last_succeeded_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        new_password:
+          type: string
+          minLength: 12
+          maxLength: 1024
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, username, roles, status, must_change_password, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        username:
+          type: string
+        roles:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [reader, author, knowledge_admin, platform_admin]
+        status:
+          type: string
+          enum: [active, disabled]
+        must_change_password:
+          type: boolean
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+    AuthContext:
+      type: object
+      additionalProperties: false
+      required: [user, csrf_token]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        csrf_token:
+          type: string
+    CsrfTokenResponse:
+      type: object
+      additionalProperties: false
+      required: [csrf_token]
+      properties:
+        csrf_token:
+          type: string
+          minLength: 32
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [username, roles]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [reader, author, knowledge_admin, platform_admin]
+    OneTimeCredential:
+      type: object
+      additionalProperties: false
+      required: [initial_password]
+      properties:
+        initial_password:
+          type: string
+          description: Returned exactly once; never logged or stored in clear text.
+    CreateUserResponse:
+      type: object
+      additionalProperties: false
+      required: [user, credential]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        credential:
+          $ref: '#/components/schemas/OneTimeCredential'
+    UserPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        next_cursor:
+          type: [string, 'null']
+    Draft:
+      type: object
+      additionalProperties: false
+      required: [id, owner_id, title, markdown, revision, updated_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        article_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        owner_id:
+          $ref: '#/components/schemas/Uuid'
+        title:
+          type: string
+          maxLength: 300
+        markdown:
+          type: string
+          maxLength: 1000000
+        revision:
+          type: integer
+          minimum: 1
+        updated_at:
+          $ref: '#/components/schemas/Timestamp'
+    CreateDraftRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          maxLength: 300
+          default: ''
+        markdown:
+          type: string
+          maxLength: 1000000
+          default: ''
+    UpdateDraftRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          maxLength: 300
+        markdown:
+          type: string
+          maxLength: 1000000
+    DraftPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Draft'
+        next_cursor:
+          type: [string, 'null']
+    PublishDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [draft_revision]
+      properties:
+        draft_revision:
+          type: integer
+          minimum: 1
+    PublishRequest:
+      type: object
+      additionalProperties: false
+      required: [id, draft_id, draft_revision, status, created_at, updated_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        draft_id:
+          $ref: '#/components/schemas/Uuid'
+        draft_revision:
+          type: integer
+        status:
+          type: string
+          enum: [queued, publishing, reconciling, succeeded, retryable_failed, blocked_failed]
+        article_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        commit_sha:
+          type: [string, 'null']
+          pattern: '^[a-f0-9]{40,64}$'
+        error_code:
+          type: [string, 'null']
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        updated_at:
+          $ref: '#/components/schemas/Timestamp'
+    ArticleSummary:
+      type: object
+      required: [id, title, author_id, status, current_commit_sha, published_at, classification_status]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        title:
+          type: string
+        author_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [published, unpublished, deleted]
+        current_commit_sha:
+          type: string
+        published_at:
+          $ref: '#/components/schemas/Timestamp'
+        classification_status:
+          type: string
+          enum: [pending, classified, needs_review, failed, disabled]
+    ArticleDetail:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ArticleSummary'
+        - type: object
+          required: [markdown, body_hash, content_hash]
+          properties:
+            markdown:
+              type: string
+            body_hash:
+              type: string
+              pattern: '^sha256:[a-f0-9]{64}$'
+            content_hash:
+              type: string
+              pattern: '^sha256:[a-f0-9]{64}$'
+              description: Hash of the canonical published index.md bytes.
+            classification:
+              oneOf:
+                - $ref: '#/components/schemas/Classification'
+                - type: 'null'
+    ArticleVersion:
+      type: object
+      additionalProperties: false
+      required: [id, article_id, commit_sha, body_hash, content_hash, source, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        article_id:
+          $ref: '#/components/schemas/Uuid'
+        commit_sha:
+          type: string
+        content_hash:
+          type: string
+          description: Hash of the canonical published index.md bytes.
+        body_hash:
+          type: string
+          description: Hash of the author's normalized Markdown body bytes.
+        source:
+          type: string
+          enum: [application, github]
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+    ArticlePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArticleSummary'
+        next_cursor:
+          type: [string, 'null']
+    TaxonomyNode:
+      type: object
+      additionalProperties: false
+      required: [id, kind, display_name, enabled, sort_order, version]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        kind:
+          type: string
+          enum: [content_type, topic, project]
+        parent_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        display_name:
+          type: string
+        enabled:
+          type: boolean
+        sort_order:
+          type: integer
+        version:
+          type: integer
+    TaxonomyNodeWrite:
+      type: object
+      additionalProperties: false
+      required: [kind, display_name]
+      properties:
+        kind:
+          type: string
+          enum: [content_type, topic, project]
+        parent_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        enabled:
+          type: boolean
+        sort_order:
+          type: integer
+    Taxonomy:
+      type: object
+      additionalProperties: false
+      required: [version, nodes]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyNode'
+    Classification:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - article_version_id
+        - status
+        - taxonomy_version
+        - tags
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        article_version_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [pending, classified, needs_review, failed, confirmed, corrected, superseded]
+        content_type_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        primary_topic_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        secondary_topic_ids:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/Uuid'
+        project_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 5
+          items:
+            type: string
+        confidence:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+        reason:
+          type: [string, 'null']
+          maxLength: 80
+        taxonomy_version:
+          type: integer
+        model_version:
+          type: [string, 'null']
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+    ClassificationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Classification'
+        next_cursor:
+          type: [string, 'null']
+    ClassificationFeedbackRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+    ClassificationCorrectionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        content_type_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        primary_topic_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        secondary_topic_ids:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/Uuid'
+        project_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        tags:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    ModelConfigWrite:
+      type: object
+      additionalProperties: false
+      required: [base_url, model, secret_reference]
+      properties:
+        base_url:
+          type: string
+          format: uri
+        model:
+          type: string
+          minLength: 1
+          maxLength: 200
+        secret_reference:
+          type: string
+          minLength: 1
+          maxLength: 500
+        enabled:
+          type: boolean
+          default: false
+    ModelConfig:
+      type: object
+      additionalProperties: false
+      required: [base_url, model, secret_mask, enabled, version]
+      properties:
+        base_url:
+          type: string
+          format: uri
+        model:
+          type: string
+        secret_mask:
+          type: string
+        enabled:
+          type: boolean
+        version:
+          type: integer
+    AuditRecord:
+      type: object
+      additionalProperties: false
+      required: [id, action, result, request_id, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        actor_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        object_type:
+          type: string
+        object_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        action:
+          type: string
+        result:
+          type: string
+        request_id:
+          type: string
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+    AuditPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditRecord'
+        next_cursor:
+          type: [string, 'null']
+    SystemHealth:
+      type: object
+      additionalProperties: false
+      required: [status, dependencies, queues]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unavailable]
+        dependencies:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/DependencyStatus'
+        queues:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0

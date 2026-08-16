@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/platform" },
+    { "path": "apps/api" },
+    { "path": "apps/fake-external" },
+    { "path": "apps/worker" }
+  ]
+}
