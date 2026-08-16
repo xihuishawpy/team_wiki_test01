@@ -40,6 +40,12 @@ async function main(): Promise<void> {
     workerId,
     kinds: [kind],
     handlers: { [kind]: noop },
+    onDeadLetter: (job, errorCode) => {
+      logger.error(
+        { worker_id: workerId, job_id: job.id, job_kind: job.kind, error_code: errorCode },
+        'job_dead_lettered',
+      );
+    },
   });
   const controller = new AbortController();
   const stop = (signal: string): void => {

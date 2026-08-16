@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc -b && pnpm --filter @team-wiki/web build",
+    "boundaries:check": "eslint apps packages --max-warnings=0",
     "clean": "tsc -b --clean && pnpm --filter @team-wiki/web clean",
     "contracts:generate": "openapi-typescript contracts/openapi.yaml -o contracts/generated/openapi.ts",
     "contracts:lint": "redocly lint contracts/openapi.yaml",
@@ -31,7 +32,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:browser": "playwright test",
     "typecheck": "tsc -b --pretty false",
-    "verify": "pnpm format:check && pnpm lint && pnpm contracts:check && pnpm typecheck && pnpm test:unit && pnpm test:integration && pnpm build && pnpm test:e2e"
+    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm boundaries:check && pnpm contracts:lint && pnpm contracts:check && pnpm test:unit && pnpm test:integration && pnpm build && pnpm test:e2e && pnpm test:browser && pnpm audit --prod --audit-level=high"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -43,14 +44,12 @@
     "@types/pg": "8.21.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
-    "@types/supertest": "7.2.1",
     "@vitejs/plugin-react": "6.0.5",
     "@vitest/coverage-v8": "4.1.10",
     "eslint": "10.8.1",
     "jsdom": "29.0.0",
     "openapi-typescript": "7.13.0",
     "prettier": "3.9.6",
-    "supertest": "7.2.2",
     "tsx": "4.23.12",
     "typescript": "5.9.3",
     "typescript-eslint": "8.67.0",

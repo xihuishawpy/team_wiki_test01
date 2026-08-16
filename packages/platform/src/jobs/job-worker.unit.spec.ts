@@ -31,6 +31,7 @@ function queueWith(job: ClaimedJob): JobQueue {
     markSucceeded: vi.fn(),
     markRetry: vi.fn(),
     markFailed: vi.fn(),
+    markDeadLetter: vi.fn(),
   };
 }
 
@@ -44,6 +45,7 @@ describe('JobWorker', () => {
       workerId: 'worker-1',
       kinds: ['publish.noop'],
       handlers: { 'publish.noop': handler },
+      onDeadLetter: vi.fn(),
     });
 
     await expect(worker.runOnce()).resolves.toBe(true);
@@ -58,17 +60,39 @@ describe('JobWorker', () => {
     const job = claimedJob({ payload: { schema_version: 999 } });
     const queue = queueWith(job);
     const handler = vi.fn();
+    const alert = vi.fn();
     const worker = new JobWorker({
       queue,
       workerId: 'worker-1',
       kinds: ['publish.noop'],
       handlers: { 'publish.noop': handler },
+      onDeadLetter: alert,
     });
 
     await worker.runOnce();
 
     expect(handler).not.toHaveBeenCalled();
-    expect(queue.markFailed).toHaveBeenCalledWith(job, 'UNKNOWN_PAYLOAD_SCHEMA');
+    expect(queue.markDeadLetter).toHaveBeenCalledWith(job, 'UNKNOWN_PAYLOAD_SCHEMA');
+    expect(queue.markFailed).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith(job, 'UNKNOWN_PAYLOAD_SCHEMA');
+  });
+
+  it('dead-letters an unsupported claimed kind and emits an alert', async () => {
+    const job = claimedJob({ kind: 'publish.unknown' });
+    const queue = queueWith(job);
+    const alert = vi.fn();
+    const worker = new JobWorker({
+      queue,
+      workerId: 'worker-1',
+      kinds: ['publish.unknown'],
+      handlers: {},
+      onDeadLetter: alert,
+    });
+
+    await worker.runOnce();
+
+    expect(queue.markDeadLetter).toHaveBeenCalledWith(job, 'UNSUPPORTED_JOB_KIND');
+    expect(alert).toHaveBeenCalledWith(job, 'UNSUPPORTED_JOB_KIND');
   });
 
   it('retries safe transient failures but stops at the configured attempt limit', async () => {
@@ -81,6 +105,7 @@ describe('JobWorker', () => {
       kinds: ['publish.noop'],
       handlers: { 'publish.noop': handler },
       retryDelay: () => 2_500,
+      onDeadLetter: vi.fn(),
     });
 
     await worker.runOnce();
@@ -93,6 +118,7 @@ describe('JobWorker', () => {
       workerId: 'worker-1',
       kinds: ['publish.noop'],
       handlers: { 'publish.noop': handler },
+      onDeadLetter: vi.fn(),
     });
     await exhaustedWorker.runOnce();
     expect(exhaustedQueue.markFailed).toHaveBeenCalledWith(exhaustedJob, 'GITHUB_RATE_LIMITED');

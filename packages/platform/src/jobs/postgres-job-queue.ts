@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 
-export type JobStatus = 'queued' | 'running' | 'retry' | 'succeeded' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'retry' | 'succeeded' | 'failed' | 'dead_letter';
 
 interface JobRow {
   readonly id: string;
@@ -63,6 +63,7 @@ export interface JobQueue {
   markSucceeded(job: ClaimedJob): Promise<void>;
   markRetry(job: ClaimedJob, errorCode: string, delayMs: number): Promise<void>;
   markFailed(job: ClaimedJob, errorCode: string): Promise<void>;
+  markDeadLetter(job: ClaimedJob, errorCode: string): Promise<void>;
 }
 
 export class LostJobLeaseError extends Error {
@@ -139,6 +140,7 @@ export class PostgresJobQueue implements JobQueue {
               last_error_code = 'LEASE_EXPIRED_AT_ATTEMPT_LIMIT',
               updated_at = now()
           WHERE status = 'running'
+            AND kind = ANY($3::text[])
             AND lease_until < now()
             AND attempts >= max_attempts
         ), candidate AS (
@@ -174,7 +176,7 @@ export class PostgresJobQueue implements JobQueue {
   }
 
   public async markSucceeded(job: ClaimedJob): Promise<void> {
-    await this.finishOwnedJob(job, "status = 'succeeded', last_error_code = NULL");
+    await this.finishOwnedJob(job, 'succeeded', null);
   }
 
   public async markRetry(job: ClaimedJob, errorCode: string, delayMs: number): Promise<void> {
@@ -197,34 +199,29 @@ export class PostgresJobQueue implements JobQueue {
   }
 
   public async markFailed(job: ClaimedJob, errorCode: string): Promise<void> {
-    const result = await this.pool.query(
-      `
-        UPDATE background_jobs
-        SET status = 'failed',
-            lease_owner = NULL,
-            lease_until = NULL,
-            last_error_code = $3,
-            updated_at = now()
-        WHERE id = $1 AND status = 'running' AND lease_owner = $2
-      `,
-      [job.id, job.leaseOwner, errorCode],
-    );
-    if (result.rowCount !== 1) {
-      throw new LostJobLeaseError(job.id);
-    }
+    await this.finishOwnedJob(job, 'failed', errorCode);
   }
 
-  private async finishOwnedJob(job: ClaimedJob, assignment: string): Promise<void> {
+  public async markDeadLetter(job: ClaimedJob, errorCode: string): Promise<void> {
+    await this.finishOwnedJob(job, 'dead_letter', errorCode);
+  }
+
+  private async finishOwnedJob(
+    job: ClaimedJob,
+    status: 'succeeded' | 'failed' | 'dead_letter',
+    errorCode: string | null,
+  ): Promise<void> {
     const result = await this.pool.query(
       `
         UPDATE background_jobs
-        SET ${assignment},
+        SET status = $3,
             lease_owner = NULL,
             lease_until = NULL,
+            last_error_code = $4,
             updated_at = now()
         WHERE id = $1 AND status = 'running' AND lease_owner = $2
       `,
-      [job.id, job.leaseOwner],
+      [job.id, job.leaseOwner, status, errorCode],
     );
     if (result.rowCount !== 1) {
       throw new LostJobLeaseError(job.id);

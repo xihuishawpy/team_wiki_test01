@@ -28,6 +28,23 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@team-wiki/*/src/**',
+                '@team-wiki/*/dist/**',
+                '../../packages/*/src/**',
+                '../../../packages/*/src/**',
+                '../../../../packages/*/src/**',
+              ],
+              message: 'Import another package only through its public workspace export.',
+            },
+          ],
+        },
+      ],
     },
   },
   {

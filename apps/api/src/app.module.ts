@@ -2,15 +2,14 @@ import { Module, type DynamicModule } from '@nestjs/common';
 
 import type { ReadinessChecker } from '@team-wiki/platform';
 
-import { HealthController, READINESS_CHECKER } from './health.controller.js';
+import { PlatformHealthModule } from './platform-health.module.js';
 
 @Module({})
 export class AppModule {
   public static register(readinessChecker: ReadinessChecker): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController],
-      providers: [{ provide: READINESS_CHECKER, useValue: readinessChecker }],
+      imports: [PlatformHealthModule.register(readinessChecker)],
     };
   }
 }

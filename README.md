@@ -26,8 +26,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Compose waits for PostgreSQL, runs all pending migrations once, then starts the API, local fake
-external services and the publish/classify/reconcile workers. Open `http://localhost:3000`.
+Compose waits for PostgreSQL, runs all pending migrations once, applies runtime grants, then starts
+the API, local fake external services and the publish/classify/reconcile workers. Each runtime uses
+a separate non-owner database login; only the one-shot migrator owns schema objects. Open
+`http://localhost:3000`.
 
 Health endpoints:
 
@@ -85,19 +87,14 @@ back up first and prefer a forward repair when a rollback would discard user dat
 ## Verification
 
 ```bash
-pnpm format:check
-pnpm lint
-pnpm contracts:check
-pnpm typecheck
-pnpm test:unit
-pnpm test:integration
-pnpm test:e2e
-pnpm test:browser
-pnpm build
+pnpm verify
 ```
 
 `pnpm test:integration` uses `TEST_DATABASE_URL`; without it, PostgreSQL-only suites are reported as
-skipped. CI supplies a real PostgreSQL 18 service and also verifies migrate → rollback → migrate.
+skipped. The unified command also checks formatting, lint and private-import boundaries, OpenAPI
+lint/drift, types, unit/E2E/browser smoke, the production dependency audit and the build. CI
+supplies a real PostgreSQL 18 service, runs a dedicated secret scanner and verifies migrate →
+rollback → migrate.
 
 The committed OpenAPI 3.1 contract lives at `contracts/openapi.yaml`; generated TypeScript types
 live at `contracts/generated/openapi.ts`. `pnpm contracts:check` fails when generated types drift.
@@ -118,9 +115,16 @@ never echo values. `.env.example` contains disabled integrations and local-only 
 credentials belong in the deployment secret manager and must be injected only into the consuming
 role.
 
+The Compose credentials are disposable development defaults. Production must create equivalent
+separate roles with generated passwords and inject only the corresponding `DATABASE_URL`. After
+changing local role passwords or grants, recreate the disposable database volume so the PostgreSQL
+initialization scripts run again.
+
 Workers claim jobs with `FOR UPDATE SKIP LOCKED`, a time-bounded lease and a `(kind, dedupe_key)`
 unique constraint. Delivery is at-least-once, so every future business handler must enforce its own
-domain idempotency key before changing state.
+domain idempotency key before changing state. PostgreSQL row-level policies restrict each worker to
+its own job-kind prefix. Unknown payload versions enter a distinct dead-letter terminal state and
+emit a structured error event suitable for alerting; payload bodies are never logged.
 
 ## Architecture
 
@@ -129,6 +133,7 @@ domain idempotency key before changing state.
 - `apps/worker` — publish, classify and reconcile worker entry points.
 - `apps/fake-external` — deterministic local-only GitHub/model stub.
 - `packages/platform` — configuration, PostgreSQL, migration, queue and observability primitives.
+- `packages/modules` — public module ownership/dependency/adapter-port contracts.
 - `migrations` — reversible explicit SQL migrations.
 - `contracts` — approved OpenAPI contract and generated types.
 - `docs/architecture` — accepted technical baseline and future full-schema reference.

@@ -7,6 +7,7 @@ export interface JobWorkerOptions {
   readonly workerId: string;
   readonly kinds: readonly string[];
   readonly handlers: Readonly<Record<string, JobHandler>>;
+  readonly onDeadLetter: (job: ClaimedJob, errorCode: string) => void | Promise<void>;
   readonly leaseMs?: number;
   readonly retryDelay?: (attempts: number) => number;
 }
@@ -74,13 +75,13 @@ export class JobWorker {
     }
 
     if (!supportedPayload(job.payload)) {
-      await this.options.queue.markFailed(job, 'UNKNOWN_PAYLOAD_SCHEMA');
+      await this.deadLetter(job, 'UNKNOWN_PAYLOAD_SCHEMA');
       return true;
     }
 
     const handler = this.options.handlers[job.kind];
     if (!handler) {
-      await this.options.queue.markFailed(job, 'UNSUPPORTED_JOB_KIND');
+      await this.deadLetter(job, 'UNSUPPORTED_JOB_KIND');
       return true;
     }
 
@@ -99,6 +100,11 @@ export class JobWorker {
       }
     }
     return true;
+  }
+
+  private async deadLetter(job: ClaimedJob, errorCode: string): Promise<void> {
+    await this.options.queue.markDeadLetter(job, errorCode);
+    await this.options.onDeadLetter(job, errorCode);
   }
 
   public async run(signal: AbortSignal, pollIntervalMs: number): Promise<void> {

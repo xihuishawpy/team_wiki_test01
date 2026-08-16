@@ -3,7 +3,6 @@ name: team-wiki-local
 x-app-environment: &app-environment
   NODE_ENV: development
   LOG_LEVEL: info
-  DATABASE_URL: postgres://team_wiki:local_only_change_me@postgres:5432/team_wiki
   GITHUB_PUBLISH_ENABLED: 'false'
   GITHUB_READ_ENABLED: 'false'
   MODEL_ENABLED: 'false'
@@ -25,22 +24,51 @@ services:
     image: postgres:18.4-alpine3.23
     environment:
       POSTGRES_DB: team_wiki
-      POSTGRES_USER: team_wiki
-      POSTGRES_PASSWORD: local_only_change_me
+      POSTGRES_USER: team_wiki_migrator
+      POSTGRES_PASSWORD: ${TEAM_WIKI_MIGRATOR_DB_PASSWORD:-local_migrator_change_me}
+      TEAM_WIKI_API_DB_PASSWORD: ${TEAM_WIKI_API_DB_PASSWORD:-local_api_change_me}
+      TEAM_WIKI_PUBLISH_DB_PASSWORD: ${TEAM_WIKI_PUBLISH_DB_PASSWORD:-local_publish_change_me}
+      TEAM_WIKI_CLASSIFY_DB_PASSWORD: ${TEAM_WIKI_CLASSIFY_DB_PASSWORD:-local_classify_change_me}
+      TEAM_WIKI_RECONCILE_DB_PASSWORD: ${TEAM_WIKI_RECONCILE_DB_PASSWORD:-local_reconcile_change_me}
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U team_wiki -d team_wiki']
+      test: ['CMD-SHELL', 'pg_isready -U team_wiki_migrator -d team_wiki']
       interval: 2s
       timeout: 3s
       retries: 20
     volumes:
       - postgres-data:/var/lib/postgresql
+      - ./ops/postgres/init-roles.sh:/docker-entrypoint-initdb.d/001-init-roles.sh:ro
 
   migrate:
     <<: *app-runtime
     command: ['node', 'packages/platform/dist/migrations/cli.js', 'up']
+    environment:
+      <<: *app-environment
+      DATABASE_URL: postgres://team_wiki_migrator:${TEAM_WIKI_MIGRATOR_DB_PASSWORD:-local_migrator_change_me}@postgres:5432/team_wiki
     depends_on:
       postgres:
         condition: service_healthy
+    restart: 'no'
+
+  permissions:
+    image: postgres:18.4-alpine3.23
+    command:
+      [
+        'psql',
+        'postgres://team_wiki_migrator:${TEAM_WIKI_MIGRATOR_DB_PASSWORD:-local_migrator_change_me}@postgres:5432/team_wiki',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-f',
+        '/permissions.sql',
+      ]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./ops/postgres/permissions.sql:/permissions.sql:ro
     restart: 'no'
 
   fake-external:
@@ -65,10 +93,14 @@ services:
   api:
     <<: *app-runtime
     command: ['node', 'apps/api/dist/main.js']
+    environment:
+      <<: *app-environment
+      APP_ROLE: api
+      DATABASE_URL: postgres://team_wiki_api:${TEAM_WIKI_API_DB_PASSWORD:-local_api_change_me}@postgres:5432/team_wiki
     ports:
       - '${PORT:-3000}:3000'
     depends_on:
-      migrate:
+      permissions:
         condition: service_completed_successfully
       fake-external:
         condition: service_healthy
@@ -87,22 +119,34 @@ services:
   publish-worker:
     <<: *app-runtime
     command: ['node', 'apps/worker/dist/main.js', 'publish']
+    environment:
+      <<: *app-environment
+      APP_ROLE: publish
+      DATABASE_URL: postgres://team_wiki_publish:${TEAM_WIKI_PUBLISH_DB_PASSWORD:-local_publish_change_me}@postgres:5432/team_wiki
     depends_on:
-      migrate:
+      permissions:
         condition: service_completed_successfully
 
   classify-worker:
     <<: *app-runtime
     command: ['node', 'apps/worker/dist/main.js', 'classify']
+    environment:
+      <<: *app-environment
+      APP_ROLE: classify
+      DATABASE_URL: postgres://team_wiki_classify:${TEAM_WIKI_CLASSIFY_DB_PASSWORD:-local_classify_change_me}@postgres:5432/team_wiki
     depends_on:
-      migrate:
+      permissions:
         condition: service_completed_successfully
 
   reconcile-worker:
     <<: *app-runtime
     command: ['node', 'apps/worker/dist/main.js', 'reconcile']
+    environment:
+      <<: *app-environment
+      APP_ROLE: reconcile
+      DATABASE_URL: postgres://team_wiki_reconcile:${TEAM_WIKI_RECONCILE_DB_PASSWORD:-local_reconcile_change_me}@postgres:5432/team_wiki
     depends_on:
-      migrate:
+      permissions:
         condition: service_completed_successfully
 
 volumes:

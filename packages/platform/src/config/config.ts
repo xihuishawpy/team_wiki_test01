@@ -19,33 +19,32 @@ export interface ApiConfig {
   };
 }
 
+interface DisabledIntegration {
+  readonly enabled: false;
+}
+
+interface GitHubAppCredentials {
+  readonly appId: string;
+  readonly installationId: string;
+  readonly privateKey: string;
+}
+
+interface ContentRepository {
+  readonly owner: string;
+  readonly repository: string;
+}
+
+type GitHubReaderConfig = { readonly enabled: true } & GitHubAppCredentials & ContentRepository;
+type GitHubPublisherConfig = GitHubReaderConfig & { readonly branch: string };
+
 export interface PublishWorkerConfig {
   readonly common: CommonConfig & { readonly role: 'publish' };
-  readonly github:
-    | { readonly enabled: false }
-    | {
-        readonly enabled: true;
-        readonly appId: string;
-        readonly installationId: string;
-        readonly privateKey: string;
-        readonly owner: string;
-        readonly repository: string;
-        readonly branch: string;
-      };
+  readonly github: DisabledIntegration | GitHubPublisherConfig;
 }
 
 export interface ClassifyWorkerConfig {
   readonly common: CommonConfig & { readonly role: 'classify' };
-  readonly github:
-    | { readonly enabled: false }
-    | {
-        readonly enabled: true;
-        readonly appId: string;
-        readonly installationId: string;
-        readonly privateKey: string;
-        readonly owner: string;
-        readonly repository: string;
-      };
+  readonly github: DisabledIntegration | GitHubReaderConfig;
   readonly model:
     | { readonly enabled: false }
     | {
@@ -58,17 +57,7 @@ export interface ClassifyWorkerConfig {
 
 export interface ReconcileWorkerConfig {
   readonly common: CommonConfig & { readonly role: 'reconcile' };
-  readonly github:
-    | { readonly enabled: false }
-    | {
-        readonly enabled: true;
-        readonly appId: string;
-        readonly installationId: string;
-        readonly privateKey: string;
-        readonly owner: string;
-        readonly repository: string;
-        readonly branch: string;
-      };
+  readonly github: DisabledIntegration | GitHubPublisherConfig;
 }
 
 export type ApplicationConfig =

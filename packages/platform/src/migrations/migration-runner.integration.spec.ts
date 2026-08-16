@@ -1,4 +1,7 @@
 import { fileURLToPath } from 'node:url';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -55,5 +58,42 @@ describeWithPostgres('MigrationRunner with PostgreSQL', () => {
       'SELECT count(*) AS count FROM schema_migrations',
     );
     expect(result.rows[0]?.count).toBe('1');
+  });
+
+  it('rolls back the entire batch when a later migration fails', async () => {
+    const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'team-wiki-migrations-'));
+    try {
+      await Promise.all([
+        writeFile(
+          path.join(temporaryDirectory, '0001_valid.up.sql'),
+          'CREATE TABLE migration_atomicity_probe (id integer PRIMARY KEY);',
+        ),
+        writeFile(
+          path.join(temporaryDirectory, '0001_valid.down.sql'),
+          'DROP TABLE migration_atomicity_probe;',
+        ),
+        writeFile(
+          path.join(temporaryDirectory, '0002_invalid.up.sql'),
+          'CREATE TABLE should_rollback_too (id integer); SELECT invalid_syntax FROM;',
+        ),
+        writeFile(
+          path.join(temporaryDirectory, '0002_invalid.down.sql'),
+          'DROP TABLE should_rollback_too;',
+        ),
+      ]);
+
+      await expect(new MigrationRunner(context.pool, temporaryDirectory).up()).rejects.toThrow();
+      await expect(
+        context.pool.query(
+          "SELECT to_regclass('migration_atomicity_probe') AS first, " +
+            "to_regclass('should_rollback_too') AS second, " +
+            "to_regclass('schema_migrations') AS migrations",
+        ),
+      ).resolves.toMatchObject({
+        rows: [{ first: null, second: null, migrations: null }],
+      });
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
   });
 });

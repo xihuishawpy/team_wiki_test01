@@ -1,5 +1,6 @@
-import type { INestApplication } from '@nestjs/common';
-import request from 'supertest';
+import { fileURLToPath } from 'node:url';
+
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ApiConfig, DependencyProbe } from '@team-wiki/platform';
@@ -28,7 +29,7 @@ const healthyProbe = (name: string, required: boolean): DependencyProbe => ({
 });
 
 describe('health endpoints', () => {
-  let application: INestApplication | undefined;
+  let application: NestFastifyApplication | undefined;
 
   afterEach(async () => {
     await application?.close();
@@ -47,7 +48,9 @@ describe('health endpoints', () => {
       logger: false,
     });
 
-    await request(application.getHttpServer()).get('/health/live').expect(200, { status: 'ok' });
+    const response = await application.inject({ method: 'GET', url: '/health/live' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'ok' });
   });
 
   it('reports optional unconfigured dependencies as degraded without leaking configuration', async () => {
@@ -57,15 +60,16 @@ describe('health endpoints', () => {
       logger: false,
     });
 
-    const response = await request(application.getHttpServer()).get('/health/ready').expect(200);
+    const response = await application.inject({ method: 'GET', url: '/health/ready' });
 
-    expect(response.body).toEqual({
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
       status: 'degraded',
       database: { status: 'ok' },
       github: { status: 'unconfigured' },
       model: { status: 'unconfigured' },
     });
-    expect(JSON.stringify(response.body)).not.toContain(config.common.databaseUrl);
+    expect(response.body).not.toContain(config.common.databaseUrl);
   });
 
   it('returns 503 when a required dependency is unavailable', async () => {
@@ -82,9 +86,10 @@ describe('health endpoints', () => {
       logger: false,
     });
 
-    const response = await request(application.getHttpServer()).get('/health/ready').expect(503);
+    const response = await application.inject({ method: 'GET', url: '/health/ready' });
 
-    expect(response.body).toEqual({
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
       code: 'DATABASE_UNAVAILABLE',
       message: 'Required dependency unavailable.',
       request_id: expect.any(String),
@@ -106,8 +111,9 @@ describe('health endpoints', () => {
       logger: false,
     });
 
-    const response = await request(application.getHttpServer()).get('/health/ready').expect(200);
-    expect(response.body).toMatchObject({
+    const response = await application.inject({ method: 'GET', url: '/health/ready' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
       status: 'degraded',
       github: { status: 'unavailable', error_code: 'GITHUB_UNAVAILABLE' },
     });
@@ -121,8 +127,8 @@ describe('health endpoints', () => {
       webRoot: fileURLToPath(new URL('../../web/dist', import.meta.url)),
     });
 
-    const response = await request(application.getHttpServer()).get('/').expect(200);
-    expect(response.text).toContain('<title>Team Wiki</title>');
+    const response = await application.inject({ method: 'GET', url: '/' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('<title>Team Wiki</title>');
   });
 });
-import { fileURLToPath } from 'node:url';

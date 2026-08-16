@@ -4,7 +4,7 @@ CREATE TABLE background_jobs (
   dedupe_key text NOT NULL,
   payload jsonb NOT NULL,
   status text NOT NULL DEFAULT 'queued'
-    CHECK (status IN ('queued', 'running', 'retry', 'succeeded', 'failed')),
+    CHECK (status IN ('queued', 'running', 'retry', 'succeeded', 'failed', 'dead_letter')),
   priority integer NOT NULL DEFAULT 0,
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   max_attempts integer NOT NULL DEFAULT 5 CHECK (max_attempts > 0),

@@ -8,6 +8,7 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/fake-external/package.json apps/fake-external/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY apps/worker/package.json apps/worker/package.json
+COPY packages/modules/package.json packages/modules/package.json
 COPY packages/platform/package.json packages/platform/package.json
 RUN pnpm install --frozen-lockfile
 
@@ -24,6 +25,4 @@ COPY --from=build --chown=node:node /app /app
 USER node
 
 EXPOSE 3000
-HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "apps/api/dist/main.js"]

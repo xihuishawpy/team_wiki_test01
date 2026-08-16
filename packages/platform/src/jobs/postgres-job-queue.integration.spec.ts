@@ -121,4 +121,55 @@ describeWithPostgres('PostgresJobQueue concurrency', () => {
       rows: [{ status: 'failed', last_error_code: 'LEASE_EXPIRED_AT_ATTEMPT_LIMIT' }],
     });
   });
+
+  it('never terminalizes an exhausted lease owned by another worker role', async () => {
+    const publishJob = await firstQueue.enqueue({
+      kind: 'publish.noop',
+      dedupeKey: 'publish-final-lease',
+      payload: { schema_version: 1 },
+      maxAttempts: 1,
+    });
+    await firstQueue.claim({
+      workerId: 'publisher-a',
+      kinds: ['publish.noop'],
+      leaseMs: 60_000,
+    });
+    await context.pool.query(
+      "UPDATE background_jobs SET lease_until = now() - interval '1 second' WHERE id = $1",
+      [publishJob.id],
+    );
+
+    await secondQueue.claim({
+      workerId: 'classifier-a',
+      kinds: ['classify.noop'],
+      leaseMs: 60_000,
+    });
+
+    await expect(
+      context.pool.query('SELECT status FROM background_jobs WHERE id = $1', [publishJob.id]),
+    ).resolves.toMatchObject({ rows: [{ status: 'running' }] });
+  });
+
+  it('persists an explicitly dead-lettered job as a distinct terminal state', async () => {
+    const enqueued = await firstQueue.enqueue({
+      kind: 'publish.noop',
+      dedupeKey: 'unknown-payload',
+      payload: { schema_version: 999 },
+    });
+    const claimed = await firstQueue.claim({
+      workerId: 'publisher-a',
+      kinds: ['publish.noop'],
+      leaseMs: 60_000,
+    });
+
+    await firstQueue.markDeadLetter(claimed!, 'UNKNOWN_PAYLOAD_SCHEMA');
+
+    await expect(
+      context.pool.query('SELECT status, last_error_code FROM background_jobs WHERE id = $1', [
+        enqueued.id,
+      ]),
+    ).resolves.toMatchObject({
+      rows: [{ status: 'dead_letter', last_error_code: 'UNKNOWN_PAYLOAD_SCHEMA' }],
+    });
+  });
 });
