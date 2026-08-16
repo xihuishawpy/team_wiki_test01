@@ -3,6 +3,7 @@ dist
 coverage
 playwright-report
 test-results
+results.sarif
 pnpm-lock.yaml
 contracts/openapi.yaml
 contracts/generated/openapi.ts
