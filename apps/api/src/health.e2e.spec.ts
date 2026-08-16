@@ -91,6 +91,28 @@ describe('health endpoints', () => {
     });
   });
 
+  it('reports a configured but unavailable external dependency without making the API unready', async () => {
+    application = await createApiApplication({
+      config: { ...config, api: { ...config.api, githubConfigured: true } },
+      probes: [
+        healthyProbe('database', true),
+        healthyProbe('migrations', true),
+        {
+          name: 'github',
+          required: false,
+          check: async () => ({ status: 'unavailable', code: 'GITHUB_UNAVAILABLE' }),
+        },
+      ],
+      logger: false,
+    });
+
+    const response = await request(application.getHttpServer()).get('/health/ready').expect(200);
+    expect(response.body).toMatchObject({
+      status: 'degraded',
+      github: { status: 'unavailable', error_code: 'GITHUB_UNAVAILABLE' },
+    });
+  });
+
   it('serves the built browser shell from the API artifact', async () => {
     application = await createApiApplication({
       config,

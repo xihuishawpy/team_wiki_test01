@@ -131,7 +131,17 @@ export class PostgresJobQueue implements JobQueue {
     }
     const result = await this.pool.query<JobRow>(
       `
-        WITH candidate AS (
+        WITH expired_exhausted AS (
+          UPDATE background_jobs
+          SET status = 'failed',
+              lease_owner = NULL,
+              lease_until = NULL,
+              last_error_code = 'LEASE_EXPIRED_AT_ATTEMPT_LIMIT',
+              updated_at = now()
+          WHERE status = 'running'
+            AND lease_until < now()
+            AND attempts >= max_attempts
+        ), candidate AS (
           SELECT id
           FROM background_jobs
           WHERE kind = ANY($3::text[])

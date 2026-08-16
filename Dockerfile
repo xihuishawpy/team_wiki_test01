@@ -13,15 +13,17 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 RUN pnpm build
+RUN pnpm install --prod --offline --frozen-lockfile
 
 FROM node:24.18.0-alpine3.23 AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 
 COPY --from=build --chown=node:node /app /app
 USER node
 
 EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "apps/api/dist/main.js"]

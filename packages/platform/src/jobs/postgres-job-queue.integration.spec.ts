@@ -88,4 +88,37 @@ describeWithPostgres('PostgresJobQueue concurrency', () => {
       attempts: 2,
     });
   });
+
+  it('moves an expired final lease to a terminal failure instead of leaving it stuck', async () => {
+    const enqueued = await firstQueue.enqueue({
+      kind: 'reconcile.noop',
+      dedupeKey: 'article-version-3',
+      payload: { schema_version: 1, article_id: 'article-3' },
+      maxAttempts: 1,
+    });
+    await firstQueue.claim({
+      workerId: 'worker-a',
+      kinds: ['reconcile.noop'],
+      leaseMs: 60_000,
+    });
+    await context.pool.query(
+      "UPDATE background_jobs SET lease_until = now() - interval '1 second' WHERE id = $1",
+      [enqueued.id],
+    );
+
+    await expect(
+      secondQueue.claim({
+        workerId: 'worker-b',
+        kinds: ['reconcile.noop'],
+        leaseMs: 60_000,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      context.pool.query('SELECT status, last_error_code FROM background_jobs WHERE id = $1', [
+        enqueued.id,
+      ]),
+    ).resolves.toMatchObject({
+      rows: [{ status: 'failed', last_error_code: 'LEASE_EXPIRED_AT_ATTEMPT_LIMIT' }],
+    });
+  });
 });

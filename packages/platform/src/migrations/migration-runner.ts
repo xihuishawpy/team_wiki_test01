@@ -39,7 +39,7 @@ async function discoverMigrations(directory: string): Promise<readonly Migration
       ]);
       return {
         id,
-        checksum: createHash('sha256').update(upSql).digest('hex'),
+        checksum: createHash('sha256').update(upSql).update('\0').update(downSql).digest('hex'),
         upSql,
         downSql,
       };
