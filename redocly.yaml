@@ -1,0 +1,8 @@
+extends:
+  - recommended
+
+rules:
+  # Internal/private API: no distributable software license is published here.
+  info-license: off
+  # Read-only and health operations intentionally use 2xx/5xx where 4xx is not meaningful.
+  operation-4xx-response: off

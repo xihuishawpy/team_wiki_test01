@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm boundaries:check
+      - run: pnpm contracts:lint
+      - run: pnpm contracts:check
+      - run: pnpm test:unit
+      - run: pnpm build
+      - run: pnpm audit --prod --audit-level=high
+
+  postgres-and-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.23
+        env:
+          POSTGRES_DB: team_wiki_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d team_wiki_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/team_wiki_test
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/team_wiki_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm db:rollback
+      - run: pnpm db:migrate
+      - run: pnpm test:integration
+      - run: pnpm build
+      - run: pnpm test:e2e
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up --build --detach
+      - run: curl --fail --retry 20 --retry-connrefused --retry-all-errors --retry-delay 2 http://127.0.0.1:3000/health/ready
+      - run: sh ops/postgres/verify-local-role-boundaries.sh
+      - run: docker compose down
+      - run: docker compose up --detach
+      - run: curl --fail --retry 20 --retry-connrefused --retry-all-errors --retry-delay 2 http://127.0.0.1:3000/health/ready
+      - if: always()
+        run: docker compose down --volumes

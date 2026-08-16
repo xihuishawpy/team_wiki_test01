@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Disposable local-only database placeholders"
+regexes = [
+  '''local_(migrator|api|publish|classify|reconcile)_change_me''',
+]
